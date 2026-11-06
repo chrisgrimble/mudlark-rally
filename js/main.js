@@ -762,3 +762,6 @@ function frame(now) {
 
 toTitle();
 requestAnimationFrame(frame);
+
+// Makes the game installable and playable offline. Unavailable when opened from a local file.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
