@@ -6,7 +6,7 @@ ctx.imageSmoothingEnabled = false;
 const STEP = 1 / 60;
 const MAX_SPEED = SEG_LEN / STEP;
 const BOOST_FACTOR = 1.35, OFFROAD_FACTOR = 0.45;
-const ACCEL = MAX_SPEED / 4.5, BRAKE = MAX_SPEED / 1.3, COAST = MAX_SPEED / 7, OVERSPEED_DECEL = MAX_SPEED / 1.4;
+const ACCEL = MAX_SPEED / 4.5, COAST = MAX_SPEED / 7, OVERSPEED_DECEL = MAX_SPEED / 1.4;
 const STEER_RATE = 2.2, CENTRIFUGAL = 0.12, ROAD_LIMIT = 2.3;
 const GRAVITY = 14000, RAMP_VY = 5400, AIR_CLEARANCE = 260;
 const PLAYER_HW = 0.1, GLANCE_RATIO = 0.72;
@@ -15,7 +15,7 @@ const CHAIN_TIMEOUT = 6, MAX_MULT = 5, BOOST_DRAIN = 0.32;
 const BOOST_BEACON = 0.015, BOOST_GATE = 0.0375;
 const BEST_KEY = 'mudlark-rally-best';
 
-const input = { left: false, right: false, down: false, boost: false };
+const input = { left: false, right: false, boost: false };
 let touchMode = false;
 
 const game = {
@@ -231,8 +231,7 @@ function stepPlayer(dt, controls) {
 
     let limit = MAX_SPEED * (p.boosting ? BOOST_FACTOR : 1);
     if (offroad) limit *= OFFROAD_FACTOR;
-    if (controls && controls.down) p.speed -= BRAKE * dt;
-    else if (p.boosting) p.speed += ACCEL * 2.2 * dt;
+    if (p.boosting) p.speed += ACCEL * 2.2 * dt;
     else if (controls) p.speed += ACCEL * dt * (1.15 - pct * 0.5);
     else p.speed -= COAST * dt;
     if (p.speed > limit) p.speed = Math.max(limit, p.speed - OVERSPEED_DECEL * dt);
@@ -371,7 +370,7 @@ function update(dt) {
       stepPlayer(dt, null);
       break;
     case 'clear':
-      stepPlayer(dt, { down: true });
+      stepPlayer(dt, null);
       game.clearTimer -= dt;
       if (game.clearTimer <= 0) advanceStage();
       break;
@@ -597,7 +596,7 @@ function drawTitle() {
   const start = touchMode ? 'TAP BOOST TO START' : 'PRESS ENTER TO START';
   if (Math.floor(game.clock * 2) % 2 === 0) text(start, cx, 236, 16, '#fff', 'center');
   if (!touchMode) {
-    text('LEFT / RIGHT  STEER     DOWN  BRAKE     SPACE  BOOST', cx, 276, 12, '#e8e0d0', 'center');
+    text('LEFT / RIGHT  STEER      SPACE  BOOST', cx, 276, 12, '#e8e0d0', 'center');
     text('P  PAUSE      M  SOUND', cx, 294, 12, '#e8e0d0', 'center');
   }
   text('Beat the clock. Chain beacons. Ride the ramps.', cx, 318, 12, '#e8e0d0', 'center');
@@ -698,7 +697,7 @@ function togglePause() {
 
 const KEYS = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ArrowDown: 'down', KeyS: 'down', Space: 'boost',
+  Space: 'boost',
 };
 
 function actionDown(action) {
