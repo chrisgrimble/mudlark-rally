@@ -552,11 +552,12 @@ function drawHud() {
   text(game.stage.name, VIEW_W - 12, 18, 12, '#ffd23c', 'right');
   text(`LEG ${Math.min(game.stage.legs, legsDone + 1)}/${game.stage.legs}`, VIEW_W - 12, 36, 14, '#fff', 'right');
 
-  const hudY = VIEW_H - (touchMode ? 96 : 14);
+  // On touch screens the bottom of the view belongs to the buttons, so these readouts move to the top left.
+  const hudY = touchMode ? 64 : VIEW_H - 14;
   text(`${Math.round(p.speed / MAX_SPEED * 160)}`, 12, hudY, 26);
   text('KM/H', 66, hudY, 11, '#ffd23c');
 
-  const bx = VIEW_W - 112, by = hudY - 12;
+  const bx = touchMode ? 12 : VIEW_W - 112, by = touchMode ? 84 : hudY - 12;
   text('BOOST', bx, by - 5, 11, '#ffd23c');
   ctx.fillStyle = 'rgba(0,0,0,.6)';
   ctx.fillRect(bx, by, 100, 10);
