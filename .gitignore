@@ -1,0 +1,4 @@
+.venv/
+.idea/
+pyproject.toml
+.DS_Store
