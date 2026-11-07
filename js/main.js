@@ -26,20 +26,23 @@ const game = {
 
 const player = {};
 
+// Free Run keeps its own best score, separate from the four-course rally.
+const bestKey = () => (game.stage && game.stage.free ? BEST_KEY + '-free' : BEST_KEY);
+
 function loadBest() {
-  try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch { return 0; }
+  try { return Number(localStorage.getItem(bestKey())) || 0; } catch { return 0; }
 }
 
 function saveBest() {
   if (game.score <= game.best) return;
   game.best = game.score;
   game.newBest = true;
-  try { localStorage.setItem(BEST_KEY, String(game.best)); } catch { /* storage unavailable */ }
+  try { localStorage.setItem(bestKey(), String(game.best)); } catch { /* storage unavailable */ }
 }
 
 function resetPlayer() {
   Object.assign(player, {
-    x: 0, z: 0, speed: 0, steer: 0, wy: 0, vy: 0, air: false, airTime: 0,
+    x: 0, z: 0, px: 0, py: 0, heading: 0, speed: 0, steer: 0, wy: 0, vy: 0, air: false, airTime: 0,
     crash: 0, invuln: 0, tilt: 0, tiltDir: 1, spin: 0, squash: 0, tread: 0, roll: 0,
     boost: 0.35, boosting: false, chain: 0, chainTimer: 0, slick: 0,
   });
@@ -48,8 +51,15 @@ function resetPlayer() {
 function loadStage(index) {
   game.stageIndex = index;
   game.stage = STAGES[index];
-  game.track = buildTrack(game.stage);
+  const free = !!game.stage.free;
+  game.track = free ? null : buildTrack(game.stage);
+  game.world = free ? buildWorld(game.stage) : null;
   game.art = makeStageArt(game.stage, index);
+  if (free) game.art.ground = makeGroundTexture(game.stage);
+  game.best = loadBest();
+  game.gates = 0;
+  game.skyX = 0;
+  game.skyY = free ? FREE_HORIZON - VIEW_H / 2 - 24 : 0;
   game.popups.length = 0;
   game.particles.length = 0;
   game.banner = null;
@@ -143,20 +153,10 @@ function hitItem(item, height) {
   if (height > AIR_CLEARANCE) return;
   switch (item.k) {
     case 'ramp':
-      if (player.speed > MAX_SPEED * 0.2) {
-        player.air = true;
-        player.airTime = 0;
-        player.vy = RAMP_VY * (0.4 + 0.6 * Math.min(1.15, player.speed / MAX_SPEED));
-        sound.launch();
-      }
+      launch();
       break;
     case 'puddle':
-      if (player.slick <= 0) {
-        player.speed *= 0.82;
-        sound.splash();
-        burst(VIEW_W / 2, VIEW_H - 14, 14, ['#b7d6e2', '#6f93a8', '#fff'], 200);
-      }
-      player.slick = 0.45;
+      splash();
       break;
     case 'boulder':
     case 'barrel':
@@ -169,6 +169,23 @@ function hitItem(item, height) {
     default:
       if (item.solid) crash();
   }
+}
+
+function launch() {
+  if (player.speed <= MAX_SPEED * 0.2) return;
+  player.air = true;
+  player.airTime = 0;
+  player.vy = RAMP_VY * (0.4 + 0.6 * Math.min(1.15, player.speed / MAX_SPEED));
+  sound.launch();
+}
+
+function splash() {
+  if (player.slick <= 0) {
+    player.speed *= 0.82;
+    sound.splash();
+    burst(VIEW_W / 2, VIEW_H - 14, 14, ['#b7d6e2', '#6f93a8', '#fff'], 200);
+  }
+  player.slick = 0.45;
 }
 
 function crossSegment(seg, height) {
@@ -194,16 +211,19 @@ function finishStage() {
   sound.fanfare();
 }
 
-// One physics tick. Pass controls = null to let the rover coast with nobody at the wheel.
-function stepPlayer(dt, controls) {
+// The parts of a physics tick shared by the road courses and Free Run: timers, crash
+// recovery, steering input, boost and throttle. Returns false while the rover is wrecked.
+function driveTick(dt, controls, offroad) {
   const p = player;
-  const startSeg = segAt(p.z + PLAYER_Z);
   const pct = p.speed / MAX_SPEED;
-  const height = () => p.wy - groundAt(p.z + PLAYER_Z);
-
   p.invuln = Math.max(0, p.invuln - dt);
   p.slick = Math.max(0, p.slick - dt);
   p.squash = Math.max(0, p.squash - dt * 5);
+  p.tilt = Math.max(0, p.tilt - dt);
+  if (p.chainTimer > 0) {
+    p.chainTimer -= dt;
+    if (p.chainTimer <= 0) p.chain = 0;
+  }
 
   if (p.crash > 0) {
     p.crash -= dt;
@@ -212,41 +232,58 @@ function stepPlayer(dt, controls) {
     if (p.crash <= 0) {
       p.spin = 0;
       p.invuln = RECOVER_TIME;
-      p.x = Math.max(-0.9, Math.min(0.9, p.x));
     }
-  } else {
-    const steerIn = controls ? (controls.right ? 1 : 0) - (controls.left ? 1 : 0) : 0;
-    p.steer += (steerIn - p.steer) * Math.min(1, dt * 11);
-    const grip = (p.air ? 0.4 : 1) * (p.tilt > 0 ? 0.55 : 1) * (p.slick > 0 ? 0.6 : 1);
+    return false;
+  }
+
+  const steerIn = controls ? (controls.right ? 1 : 0) - (controls.left ? 1 : 0) : 0;
+  p.steer += (steerIn - p.steer) * Math.min(1, dt * 11);
+
+  const wantBoost = controls && controls.boost && p.boost > 0 && !offroad;
+  if (wantBoost && !p.boosting) sound.boost();
+  p.boosting = wantBoost;
+  if (p.boosting) p.boost = Math.max(0, p.boost - BOOST_DRAIN * dt);
+
+  let limit = MAX_SPEED * (p.boosting ? BOOST_FACTOR : 1);
+  if (offroad) limit *= OFFROAD_FACTOR;
+  if (p.boosting) p.speed += ACCEL * 2.2 * dt;
+  else if (controls) p.speed += ACCEL * dt * (1.15 - pct * 0.5);
+  else p.speed -= COAST * dt;
+  if (p.speed > limit) p.speed = Math.max(limit, p.speed - OVERSPEED_DECEL * dt);
+  p.speed = Math.max(0, p.speed);
+  return true;
+}
+
+const steerGrip = () => (player.air ? 0.4 : 1) * (player.tilt > 0 ? 0.55 : 1) * (player.slick > 0 ? 0.6 : 1);
+
+function updateRoll(dt) {
+  const p = player;
+  const pct = p.speed / MAX_SPEED;
+  const lean = p.tilt > 0 ? -p.tiltDir * 0.42 * Math.min(1, p.tilt * 4) : 0;
+  const target = lean + p.steer * 0.1 * Math.min(1, pct * 1.5) + (p.air ? p.steer * 0.12 : 0);
+  p.roll += (target - p.roll) * Math.min(1, dt * 12);
+}
+
+// One physics tick on a road course. Pass controls = null to let the rover coast with nobody at the wheel.
+function stepPlayer(dt, controls) {
+  const p = player;
+  const startSeg = segAt(p.z + PLAYER_Z);
+  const pct = p.speed / MAX_SPEED;
+  const height = () => p.wy - groundAt(p.z + PLAYER_Z);
+  const offroad = Math.abs(p.x) > 1.05 && !p.air;
+  const wrecked = p.crash > 0;
+
+  if (driveTick(dt, controls, offroad)) {
     const turn = dt * STEER_RATE * Math.min(1, pct * 2);
-    p.x += p.steer * turn * grip;
+    p.x += p.steer * turn * steerGrip();
     if (!p.air) p.x -= turn * pct * startSeg.curve * CENTRIFUGAL;
     p.x = Math.max(-ROAD_LIMIT, Math.min(ROAD_LIMIT, p.x));
-
-    const offroad = Math.abs(p.x) > 1.05 && !p.air;
-    const wantBoost = controls && controls.boost && p.boost > 0 && !offroad;
-    if (wantBoost && !p.boosting) sound.boost();
-    p.boosting = wantBoost;
-    if (p.boosting) p.boost = Math.max(0, p.boost - BOOST_DRAIN * dt);
-
-    let limit = MAX_SPEED * (p.boosting ? BOOST_FACTOR : 1);
-    if (offroad) limit *= OFFROAD_FACTOR;
-    if (p.boosting) p.speed += ACCEL * 2.2 * dt;
-    else if (controls) p.speed += ACCEL * dt * (1.15 - pct * 0.5);
-    else p.speed -= COAST * dt;
-    if (p.speed > limit) p.speed = Math.max(limit, p.speed - OVERSPEED_DECEL * dt);
-    p.speed = Math.max(0, p.speed);
-
     if (offroad && p.speed > 1000) {
       game.shake = Math.max(game.shake, 2);
       if (Math.random() < 0.5) dust(game.stage.pal.ground[0]);
     }
-  }
-
-  p.tilt = Math.max(0, p.tilt - dt);
-  if (p.chainTimer > 0) {
-    p.chainTimer -= dt;
-    if (p.chainTimer <= 0) p.chain = 0;
+  } else if (wrecked && p.crash <= 0) {
+    p.x = Math.max(-0.9, Math.min(0.9, p.x));
   }
 
   const oldFront = p.z + PLAYER_Z;
@@ -279,10 +316,7 @@ function stepPlayer(dt, controls) {
   if (game.state === 'play') {
     for (let i = from; i <= to && game.state === 'play'; i++) crossSegment(game.track.segs[i], height());
   }
-
-  const lean = p.tilt > 0 ? -p.tiltDir * 0.42 * Math.min(1, p.tilt * 4) : 0;
-  const target = lean + p.steer * 0.1 * Math.min(1, pct * 1.5) + (p.air ? p.steer * 0.12 : 0);
-  p.roll += (target - p.roll) * Math.min(1, dt * 12);
+  updateRoll(dt);
 }
 
 function land(ground) {
@@ -334,17 +368,23 @@ function update(dt) {
   game.popups = game.popups.filter(p => p.life > 0);
   if (game.banner && (game.banner.life -= dt) <= 0) game.banner = null;
 
-  const seg = segAt(player.z + PLAYER_Z);
   const pct = player.speed / MAX_SPEED;
-  game.skyX += seg.curve * pct * dt * 34;
-  const slope = (seg.p2.world.y - seg.p1.world.y) / SEG_LEN;
-  game.skyY += (slope * 46 - game.skyY) * Math.min(1, dt * 3);
+  if (game.track) {
+    const seg = segAt(player.z + PLAYER_Z);
+    game.skyX += seg.curve * pct * dt * 34;
+    const slope = (seg.p2.world.y - seg.p1.world.y) / SEG_LEN;
+    game.skyY += (slope * 46 - game.skyY) * Math.min(1, dt * 3);
+  }
+  const step = game.world ? stepFree : stepPlayer;
 
   switch (game.state) {
     case 'title':
-      player.z += player.speed * dt;
-      player.wy = groundAt(player.z + PLAYER_Z);
-      if (player.z > game.track.finishZ - SEG_LEN * 100) player.z = 0;
+      if (game.world) freeAttract(dt);
+      else {
+        player.z += player.speed * dt;
+        player.wy = groundAt(player.z + PLAYER_Z);
+        if (player.z > game.track.finishZ - SEG_LEN * 100) player.z = 0;
+      }
       break;
     case 'ready': {
       const before = Math.ceil(game.countdown);
@@ -357,7 +397,7 @@ function update(dt) {
       const before = Math.ceil(game.time);
       game.time -= dt;
       if (before <= 10 && Math.ceil(game.time) !== before) sound.tick();
-      stepPlayer(dt, input);
+      step(dt, input);
       if (game.state === 'play' && game.time <= 0) {
         game.time = 0;
         game.state = 'over';
@@ -367,7 +407,7 @@ function update(dt) {
       break;
     }
     case 'over':
-      stepPlayer(dt, null);
+      step(dt, null);
       break;
     case 'clear':
       stepPlayer(dt, null);
@@ -381,7 +421,7 @@ function update(dt) {
 }
 
 function advanceStage() {
-  if (game.stageIndex + 1 < STAGES.length) startStage(game.stageIndex + 1);
+  if (game.stageIndex + 1 < COURSE_COUNT) startStage(game.stageIndex + 1);
   else {
     game.state = 'won';
     saveBest();
@@ -474,6 +514,10 @@ function drawBackdrop(pal) {
 }
 
 function drawWorld() {
+  if (game.world) {
+    drawFreeWorld();
+    return;
+  }
   const pal = game.stage.pal;
   const { segs } = game.track;
   const p = player;
@@ -543,14 +587,19 @@ function text(str, x, y, size, color = '#fff', align = 'left') {
 function drawHud() {
   const p = player;
   const cx = VIEW_W / 2;
-  const legsDone = game.track.segs.filter(s => s.checkpoint && s.p1.world.z < p.z + PLAYER_Z).length;
   text('SCORE', 12, 18, 12, '#ffd23c');
   text(String(game.score).padStart(7, '0'), 12, 36, 18);
   text('TIME', cx, 16, 12, '#ffd23c', 'center');
   const low = game.time < 10;
   text(String(Math.ceil(game.time)), cx, 46, 32, low && Math.floor(game.clock * 4) % 2 ? '#ff5a3c' : '#fff', 'center');
   text(game.stage.name, VIEW_W - 12, 18, 12, '#ffd23c', 'right');
-  text(`LEG ${Math.min(game.stage.legs, legsDone + 1)}/${game.stage.legs}`, VIEW_W - 12, 36, 14, '#fff', 'right');
+  if (game.world) {
+    text(`GATES ${game.gates}`, VIEW_W - 12, 36, 14, '#fff', 'right');
+    drawCompass();
+  } else {
+    const legsDone = game.track.segs.filter(s => s.checkpoint && s.p1.world.z < p.z + PLAYER_Z).length;
+    text(`LEG ${Math.min(game.stage.legs, legsDone + 1)}/${game.stage.legs}`, VIEW_W - 12, 36, 14, '#fff', 'right');
+  }
 
   // On touch screens the bottom of the view belongs to the buttons, so these readouts move to the top left.
   const hudY = touchMode ? 64 : VIEW_H - 14;
@@ -593,14 +642,16 @@ function drawTitle() {
   text('MUDLARK', cx, 84, 54, '#ffd23c', 'center');
   text('RALLY', cx, 124, 36, '#5ff0d8', 'center');
   text(`< ${game.stage.name} >`, cx, 178, 20, '#fff', 'center');
-  text(`COURSE ${game.menu + 1} OF ${STAGES.length}`, cx, 198, 12, '#ffd23c', 'center');
+  const free = game.stage.free;
+  text(free ? 'FREE RUN - NO ROAD' : `COURSE ${game.menu + 1} OF ${COURSE_COUNT}`, cx, 198, 12, '#ffd23c', 'center');
   const start = touchMode ? 'TAP BOOST TO START' : 'PRESS ENTER TO START';
   if (Math.floor(game.clock * 2) % 2 === 0) text(start, cx, 236, 16, '#fff', 'center');
   if (!touchMode) {
     text('LEFT / RIGHT  STEER      SPACE  BOOST', cx, 276, 12, '#e8e0d0', 'center');
     text('P  PAUSE      M  SOUND', cx, 294, 12, '#e8e0d0', 'center');
   }
-  text('Beat the clock. Chain beacons. Ride the ramps.', cx, 318, 12, '#e8e0d0', 'center');
+  const tagline = free ? 'Drive anywhere. Hit time gates to stay alive.' : 'Beat the clock. Chain beacons. Ride the ramps.';
+  text(tagline, cx, 318, 12, '#e8e0d0', 'center');
   if (game.best) text(`BEST ${game.best}`, cx, 344, 14, '#ffd23c', 'center');
 }
 

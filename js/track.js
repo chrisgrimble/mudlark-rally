@@ -16,6 +16,7 @@ const ITEMS = {
   puddle:     { w: 900,  h: 110,  hw: 0.27 },
   ramp:       { w: 1150, h: 300,  hw: 0.36 },
   gate:       { w: 1500, h: 950,  hw: 0.40 },
+  timegate:   { w: 1500, h: 950,  hw: 0.40 },
   checkpoint: { w: 3900, h: 1250, hw: 0 },
   finish:     { w: 3900, h: 1250, hw: 0 },
   arrowL:     { w: 480,  h: 560,  hw: 0.10, solid: true },
@@ -67,7 +68,17 @@ const STAGES = [
       ground: ['#2a1e27', '#231921'], road: ['#544650', '#4b3e47'], rut: '#382e35',
       edge: ['#ff7a1a', '#401018'], fog: '#5a1c20' },
   },
+  {
+    name: 'BADLANDS', seed: 5501, free: true, startTime: 45,
+    scenery: ['mesa', 'cactus', 'scrub', 'deadtree'], hazards: ['boulder', 'boulder', 'barrel'],
+    pal: { sky: ['#1d1838', '#7a3f6e', '#f4a27a'], sun: '#ffd7a0', far: '#6b3552', near: '#8c4a45',
+      ground: ['#b9774a', '#a96a40'], road: ['#d7a26c', '#cc9862'], rut: '#7f4a2f', scrub: '#6f7a3a',
+      edge: ['#e8c9a0', '#5e3326'], fog: '#e59a7a' },
+  },
 ];
+
+// Courses come first in STAGES and are played in order; anything after them is a standalone mode.
+const COURSE_COUNT = STAGES.filter(s => !s.free).length;
 
 function mulberry32(a) {
   return () => {

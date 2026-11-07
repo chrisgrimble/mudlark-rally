@@ -1,10 +1,10 @@
 'use strict';
 // Lets the installed app run offline. The network is tried first so that a
 // new version of the game is picked up whenever the phone is online.
-const CACHE = 'mudlark-rally-v1';
+const CACHE = 'mudlark-rally-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest',
-  'js/audio.js', 'js/track.js', 'js/art.js', 'js/main.js',
+  'js/audio.js', 'js/track.js', 'js/art.js', 'js/freerun.js', 'js/main.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
 

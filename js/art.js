@@ -85,6 +85,23 @@ const PAINTERS = {
     box(c, '#16304a', 0, 0, w, h * .2);
     for (let x = 6; x < w - 8; x += 22) poly(c, '#ffe066', [x, h * .04, x + 12, h * .1, x, h * .16]);
   },
+  timegate: (c, w, h) => {
+    const post = w * .06;
+    for (const x of [0, w - post]) {
+      box(c, '#ffd23c', x, h * .12, post, h * .88);
+      for (let y = h * .2; y < h; y += h * .16) box(c, '#17151c', x, y, post, h * .06);
+    }
+    box(c, '#16304a', 0, 0, w, h * .24);
+    disc(c, '#fff3b8', w / 2, h * .12, h * .09);
+    c.strokeStyle = '#16304a';
+    c.lineWidth = 3;
+    c.beginPath();
+    c.moveTo(w / 2, h * .06);
+    c.lineTo(w / 2, h * .12);
+    c.lineTo(w / 2 + h * .05, h * .14);
+    c.stroke();
+    for (const s of [-1, 1]) poly(c, '#5ff0d8', [w / 2 + s * w * .14, h * .05, w / 2 + s * w * .3, h * .12, w / 2 + s * w * .14, h * .19]);
+  },
   checkpoint: (c, w, h) => banner(c, w, h, '#1c7ed6', 'CHECKPOINT'),
   finish: (c, w, h) => {
     banner(c, w, h, '#101014', 'FINISH');
@@ -208,7 +225,7 @@ function arrow(c, w, h, dir) {
 
 const SPRITE_PIXELS = {
   beacon: [48, 48], boulder: [78, 60], barrel: [50, 66], trunk: [240, 44], puddle: [130, 18], ramp: [160, 42],
-  gate: [230, 146], checkpoint: [420, 136], finish: [420, 136], arrowL: [60, 70], arrowR: [60, 70],
+  gate: [230, 146], timegate: [230, 146], checkpoint: [420, 136], finish: [420, 136], arrowL: [60, 70], arrowR: [60, 70],
   mesa: [220, 165], cactus: [64, 112], scrub: [76, 42], pine: [96, 156], crag: [150, 120], drift: [100, 32],
   mangrove: [140, 140], reeds: [70, 64], stilt: [130, 124], spire: [70, 152], deadtree: [100, 130], vent: [84, 42],
 };
