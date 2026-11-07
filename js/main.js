@@ -13,7 +13,6 @@ const PLAYER_HW = 0.1, GLANCE_RATIO = 0.72;
 const CRASH_TIME = 1.5, RECOVER_TIME = 1.6, TILT_TIME = 1.1;
 const CHAIN_TIMEOUT = 6, MAX_MULT = 5, BOOST_DRAIN = 0.32;
 const BOOST_BEACON = 0.015, BOOST_GATE = 0.0375;
-const BEST_KEY = 'mudlark-rally-best';
 
 const input = { left: false, right: false, boost: false };
 let touchMode = false;
@@ -21,23 +20,14 @@ let touchMode = false;
 const game = {
   state: 'title', menu: 0, stageIndex: 0, stage: null, track: null, art: null,
   score: 0, time: 0, clock: 0, countdown: 0, clearTimer: 0, clearBonus: 0, paused: false,
-  best: loadBest(), newBest: false, banner: null, popups: [], particles: [], skyX: 0, skyY: 0, shake: 0,
+  newHigh: false, entry: null, highlight: -1, titleTime: 0, banner: null, popups: [], particles: [], skyX: 0, skyY: 0, shake: 0,
 };
 
 const player = {};
 
-// Free Run keeps its own best score, separate from the four-course rally.
-const bestKey = () => (game.stage && game.stage.free ? BEST_KEY + '-free' : BEST_KEY);
-
-function loadBest() {
-  try { return Number(localStorage.getItem(bestKey())) || 0; } catch { return 0; }
-}
-
-function saveBest() {
-  if (game.score <= game.best) return;
-  game.best = game.score;
-  game.newBest = true;
-  try { localStorage.setItem(bestKey(), String(game.best)); } catch { /* storage unavailable */ }
+// A run has ended: note whether the score earns a place in its high score table.
+function checkHighScore() {
+  game.newHigh = qualifies(!!game.stage.free, game.score);
 }
 
 function resetPlayer() {
@@ -56,7 +46,6 @@ function loadStage(index) {
   game.world = free ? buildWorld(game.stage) : null;
   game.art = makeStageArt(game.stage, index);
   if (free) game.art.ground = makeGroundTexture(game.stage);
-  game.best = loadBest();
   game.gates = 0;
   game.skyX = 0;
   game.skyY = free ? FREE_HORIZON - VIEW_H / 2 - 24 : 0;
@@ -75,6 +64,7 @@ function startStage(index) {
 
 function toTitle() {
   game.state = 'title';
+  game.titleTime = 0;
   loadStage(game.menu);
   player.speed = MAX_SPEED * 0.55;
 }
@@ -379,6 +369,7 @@ function update(dt) {
 
   switch (game.state) {
     case 'title':
+      game.titleTime += dt;
       if (game.world) freeAttract(dt);
       else {
         player.z += player.speed * dt;
@@ -401,7 +392,7 @@ function update(dt) {
       if (game.state === 'play' && game.time <= 0) {
         game.time = 0;
         game.state = 'over';
-        saveBest();
+        checkHighScore();
         sound.gameOver();
       }
       break;
@@ -424,7 +415,7 @@ function advanceStage() {
   if (game.stageIndex + 1 < COURSE_COUNT) startStage(game.stageIndex + 1);
   else {
     game.state = 'won';
-    saveBest();
+    checkHighScore();
     sound.fanfare();
   }
 }
@@ -636,15 +627,55 @@ function dim(alpha) {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 }
 
+function drawTable(free, highlight) {
+  const cx = VIEW_W / 2, rows = loadTable(free);
+  text(free ? 'BADLANDS HIGH SCORES' : 'RALLY HIGH SCORES', cx, 62, 20, '#5ff0d8', 'center');
+  if (!rows.length) text('NO SCORES YET', cx, 170, 16, '#e8e0d0', 'center');
+  rows.forEach((row, i) => {
+    const y = 92 + i * 21;
+    const mine = i === highlight;
+    const color = mine ? (Math.floor(game.clock * 4) % 2 ? '#fff' : '#ff9a3c') : i === 0 ? '#ffd23c' : '#fff';
+    text(`${String(i + 1).padStart(2)}.`, cx - 120, y, 16, color);
+    text(row.name, cx - 64, y, 16, color);
+    text(String(row.score).padStart(7, '0'), cx + 120, y, 16, color, 'right');
+  });
+}
+
+function drawEntry() {
+  const cx = VIEW_W / 2, e = game.entry;
+  dim(0.65);
+  text('NEW HIGH SCORE', cx, 92, 30, '#ffd23c', 'center');
+  text(`${game.stage.free ? 'BADLANDS' : 'RALLY'}  ${game.score}`, cx, 122, 16, '#fff', 'center');
+  text('ENTER YOUR INITIALS', cx, 160, 14, '#5ff0d8', 'center');
+  e.letters.forEach((letter, i) => {
+    const x = cx + (i - 1) * 60;
+    const current = i === e.pos;
+    text(letter, x, 222, 44, current ? '#ffd23c' : '#fff', 'center');
+    if (current && Math.floor(game.clock * 3) % 2 === 0) {
+      ctx.fillStyle = '#ffd23c';
+      ctx.fillRect(x - 16, 232, 32, 4);
+    }
+  });
+  const hint = touchMode ? '< > CHANGE LETTER     BOOST NEXT' : 'TYPE A LETTER OR USE < >     ENTER NEXT';
+  text(hint, cx, 280, 12, '#e8e0d0', 'center');
+}
+
 function drawTitle() {
   const cx = VIEW_W / 2;
+  const start = touchMode ? 'TAP BOOST TO START' : 'PRESS ENTER TO START';
+  // The title screen takes turns with the high score table for the selected mode.
+  if (game.titleTime % 13 > 7) {
+    dim(0.7);
+    drawTable(!!game.stage.free, -1);
+    if (Math.floor(game.clock * 2) % 2 === 0) text(start, cx, 326, 16, '#fff', 'center');
+    return;
+  }
   dim(0.45);
   text('MUDLARK', cx, 84, 54, '#ffd23c', 'center');
   text('RALLY', cx, 124, 36, '#5ff0d8', 'center');
   text(`< ${game.stage.name} >`, cx, 178, 20, '#fff', 'center');
   const free = game.stage.free;
   text(free ? 'FREE RUN - NO ROAD' : `COURSE ${game.menu + 1} OF ${COURSE_COUNT}`, cx, 198, 12, '#ffd23c', 'center');
-  const start = touchMode ? 'TAP BOOST TO START' : 'PRESS ENTER TO START';
   if (Math.floor(game.clock * 2) % 2 === 0) text(start, cx, 236, 16, '#fff', 'center');
   if (!touchMode) {
     text('LEFT / RIGHT  STEER      SPACE  BOOST', cx, 276, 12, '#e8e0d0', 'center');
@@ -652,7 +683,8 @@ function drawTitle() {
   }
   const tagline = free ? 'Drive anywhere. Hit time gates to stay alive.' : 'Beat the clock. Chain beacons. Ride the ramps.';
   text(tagline, cx, 318, 12, '#e8e0d0', 'center');
-  if (game.best) text(`BEST ${game.best}`, cx, 344, 14, '#ffd23c', 'center');
+  const best = topScore(!!free);
+  if (best) text(`BEST ${best}`, cx, 344, 14, '#ffd23c', 'center');
 }
 
 function drawOverlay() {
@@ -674,7 +706,7 @@ function drawOverlay() {
       dim(0.5);
       text('OUT OF TIME', cx, 130, 38, '#ff5a3c', 'center');
       text(`SCORE ${game.score}`, cx, 172, 20, '#fff', 'center');
-      if (game.newBest) text('NEW BEST!', cx, 198, 16, '#ffd23c', 'center');
+      if (game.newHigh) text('NEW HIGH SCORE!', cx, 198, 16, '#ffd23c', 'center');
       text(touchMode ? 'TAP BOOST' : 'PRESS ENTER', cx, 232, 14, '#e8e0d0', 'center');
       break;
     case 'won':
@@ -682,8 +714,16 @@ function drawOverlay() {
       text('RALLY CHAMPION', cx, 126, 36, '#ffd23c', 'center');
       text('All four courses conquered', cx, 156, 14, '#fff', 'center');
       text(`FINAL SCORE ${game.score}`, cx, 188, 20, '#fff', 'center');
-      if (game.newBest) text('NEW BEST!', cx, 212, 16, '#ffd23c', 'center');
+      if (game.newHigh) text('NEW HIGH SCORE!', cx, 212, 16, '#ffd23c', 'center');
       text(touchMode ? 'TAP BOOST' : 'PRESS ENTER', cx, 244, 14, '#e8e0d0', 'center');
+      break;
+    case 'entry':
+      drawEntry();
+      break;
+    case 'scores':
+      dim(0.7);
+      drawTable(!!game.stage.free, game.highlight);
+      text(touchMode ? 'TAP BOOST' : 'PRESS ENTER', cx, 326, 14, '#e8e0d0', 'center');
       break;
   }
   if (game.paused) {
@@ -725,7 +765,7 @@ function confirmAction() {
   switch (game.state) {
     case 'title':
       game.score = 0;
-      game.newBest = false;
+      game.newHigh = false;
       startStage(game.menu);
       break;
     case 'clear':
@@ -733,9 +773,42 @@ function confirmAction() {
       break;
     case 'over':
     case 'won':
+      if (game.newHigh) startEntry();
+      else showScores();
+      break;
+    case 'entry':
+      entryNext();
+      break;
+    case 'scores':
       toTitle();
       break;
   }
+}
+
+function startEntry() {
+  game.entry = { letters: lastInitials().split(''), pos: 0 };
+  game.state = 'entry';
+}
+
+function showScores() {
+  game.highlight = -1;
+  game.state = 'scores';
+}
+
+function entryCycle(dir) {
+  const e = game.entry;
+  e.letters[e.pos] = LETTERS[(LETTERS.indexOf(e.letters[e.pos]) + dir + LETTERS.length) % LETTERS.length];
+  sound.tick();
+}
+
+function entryNext() {
+  const e = game.entry;
+  sound.beacon(1);
+  if (++e.pos < NAME_LEN) return;
+  game.highlight = addTableEntry(!!game.stage.free, e.letters.join(''), game.score);
+  game.newHigh = false;
+  game.state = 'scores';
+  sound.fanfare();
 }
 
 function setPaused(paused) {
@@ -754,7 +827,10 @@ const KEYS = {
 
 function actionDown(action) {
   input[action] = true;
-  if (game.state === 'title' && action === 'left') menuMove(-1);
+  if (game.state === 'entry') {
+    if (action === 'boost') entryNext();
+    else entryCycle(action === 'left' ? -1 : 1);
+  } else if (game.state === 'title' && action === 'left') menuMove(-1);
   else if (game.state === 'title' && action === 'right') menuMove(1);
   else if (action === 'boost' && game.state !== 'play' && game.state !== 'ready') confirmAction();
 }
@@ -764,7 +840,14 @@ window.addEventListener('keydown', e => {
   if (action || e.code === 'Enter') e.preventDefault();
   if (e.repeat) return;
   sound.unlock();
-  if (action) actionDown(action);
+  if (game.state === 'entry' && /^Key[A-Z]$/.test(e.code)) {
+    e.preventDefault();
+    game.entry.letters[game.entry.pos] = e.code[3];
+    entryNext();
+  } else if (game.state === 'entry' && e.code === 'Backspace') {
+    e.preventDefault();
+    game.entry.pos = Math.max(0, game.entry.pos - 1);
+  } else if (action) actionDown(action);
   else if (e.code === 'Enter') confirmAction();
   else if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
   else if (e.code === 'KeyM') sound.toggleMute();
@@ -811,6 +894,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+migrateOldBests();
 toTitle();
 requestAnimationFrame(frame);
 
